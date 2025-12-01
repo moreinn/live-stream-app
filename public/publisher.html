@@ -1,0 +1,287 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Publisher — Live Stream</title>
+  <link rel="stylesheet" href="/styles.css">
+  <style>
+    body { font-family: Arial, sans-serif; padding: 16px; }
+    #localVideo { width: 640px; height: 360px; background: #000; }
+    #controls { margin-top: 12px; }
+    #status { margin-top: 8px; color: green; }
+    #viewers { margin-top: 8px; }
+    ul#viewerList { max-width: 640px; word-break: break-all; }
+  </style>
+</head>
+<body>
+  <h1>Publisher Page</h1>
+  <div>
+    <div><strong>Room:</strong> <span id="roomId">—</span></div>
+    <div><strong>Share link:</strong> <input id="shareLink" readonly style="width:380px" /></div>
+    <button id="copyLinkBtn">Copy Link</button>
+  </div>
+
+    <div style="display:flex; gap:16px; align-items:flex-start;">
+    <div>
+      <video id="localVideo" autoplay muted playsinline style="width:640px;height:360px;background:#000"></video>
+
+      <div id="controls" style="margin-top:12px">
+        <button id="startBtn">Start Preview & Join as Publisher</button>
+        <button id="stopBtn" disabled>Stop Stream</button>
+      </div>
+
+      <div id="status">Not connected</div>
+      <div id="viewers" style="margin-top:8px"><strong>Viewers:</strong> <span id="viewerCount">0</span></div>
+      <ul id="viewerList"></ul>
+    </div>
+
+    <div id="chatMount" style="flex:0 0 380px"></div>
+  </div>
+
+  <div id="controls">
+    <button id="startBtn">Start Preview & Join as Publisher</button>
+    <button id="stopBtn" disabled>Stop Stream</button>
+  </div>
+
+  <div id="status">Not connected</div>
+  <div id="viewers"><strong>Viewers:</strong> <span id="viewerCount">0</span></div>
+  <ul id="viewerList"></ul>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/client.js"></script>
+  <script>
+    const q = parseQuery();
+    const roomId = q.room || ('room-' + Math.random().toString(36).slice(2,9));
+    document.getElementById('roomId').textContent = roomId;
+    const shareLinkInput = document.getElementById('shareLink');
+    shareLinkInput.value = `${location.origin}/viewer.html?room=${encodeURIComponent(roomId)}`;
+    document.getElementById('copyLinkBtn').addEventListener('click', () => {
+      shareLinkInput.select();
+      document.execCommand('copy');
+      alert('Copied link to clipboard');
+    });
+
+    const startBtn = document.getElementById('startBtn');
+    const stopBtn = document.getElementById('stopBtn');
+    const statusEl = document.getElementById('status');
+    const viewerCountEl = document.getElementById('viewerCount');
+    const viewerListEl = document.getElementById('viewerList');
+    const localVideo = document.getElementById('localVideo');
+
+    let socket = null;
+    let localStream = null;
+    // Map viewerSocketId -> RTCPeerConnection
+    const pcs = new Map();
+    // Map viewerSocketId -> username
+    const viewers = new Map();
+
+    // ICE servers (use public STUN for local testing)
+    const ICE_CONFIG = {
+      iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' }
+      ]
+    };
+
+    // Helper to create peer connection for a viewer
+    function createPeerForViewer(viewerSocketId) {
+      if (!localStream) {
+        console.warn('no local stream when creating pc');
+        return null;
+      }
+      const pc = new RTCPeerConnection(ICE_CONFIG);
+
+      // add local tracks to this peer connection
+      localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+
+      // when this pc produces ICE candidates, send them to the viewer
+      pc.onicecandidate = (evt) => {
+        if (evt.candidate) {
+          socket.emit('ice-candidate', { toSocketId: viewerSocketId, candidate: evt.candidate });
+        }
+      };
+
+      // Optional: listen for connection state changes for debugging
+      pc.onconnectionstatechange = () => {
+        console.log('PC state', viewerSocketId, pc.connectionState);
+      };
+
+      return pc;
+    }
+
+    function renderViewers() {
+      viewerCountEl.textContent = String(viewers.size);
+      viewerListEl.innerHTML = '';
+      for (const [id, name] of viewers.entries()) {
+        const li = document.createElement('li');
+        li.textContent = `${name} (${id})`;
+        viewerListEl.appendChild(li);
+      }
+    }
+
+    // START button: getUserMedia, connect socket, join as publisher
+    startBtn.addEventListener('click', async () => {
+      startBtn.disabled = true;
+      statusEl.textContent = 'Requesting camera/microphone...';
+
+      try {
+        localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      } catch (err) {
+        console.error('getUserMedia error', err);
+        alert('Camera/Microphone access denied or not available.\n' + err.message);
+        startBtn.disabled = false;
+        statusEl.textContent = 'Camera access required';
+        return;
+      }
+
+      localVideo.srcObject = localStream;
+      statusEl.textContent = 'Preview ready — connecting to server...';
+
+      socket = createSocket();
+
+      let username = localStorage.getItem('username') || prompt('Enter your display name (for chat/viewers):', 'Streamer');
+      if (!username) username = 'Streamer';
+      localStorage.setItem('username', username);
+
+      // join as publisher
+      socket.emit('join-room', { roomId, role: 'publisher', username });
+
+      // handle server events
+      socket.on('joined', (data) => {
+        statusEl.textContent = `Joined room ${data.roomId} as publisher (socket: ${data.mySocketId})`;
+        stopBtn.disabled = false;
+      });
+
+      socket.on('viewer-joined', async ({ viewerSocketId, username }) => {
+        console.log('viewer-joined', viewerSocketId, username);
+        viewers.set(viewerSocketId, username || 'Viewer');
+        renderViewers();
+        statusEl.textContent = `Viewer joined: ${username || viewerSocketId}`;
+
+        // Create RTCPeerConnection for this viewer and send offer
+        const pc = createPeerForViewer(viewerSocketId);
+        pcs.set(viewerSocketId, pc);
+
+        try {
+          const offer = await pc.createOffer();
+          await pc.setLocalDescription(offer);
+          // send offer sdp to the viewer via server
+          socket.emit('offer', { toSocketId: viewerSocketId, sdp: offer.sdp });
+          console.log('sent offer to', viewerSocketId);
+        } catch (err) {
+          console.error('offer error', err);
+        }
+      });
+
+      // viewer left
+      socket.on('viewer-left', ({ viewerSocketId }) => {
+        console.log('viewer-left', viewerSocketId);
+        viewers.delete(viewerSocketId);
+        // close and remove that pc
+        const pc = pcs.get(viewerSocketId);
+        if (pc) {
+          try { pc.close(); } catch(e) {}
+          pcs.delete(viewerSocketId);
+        }
+        renderViewers();
+      });
+
+      // handle answer from viewer (viewer -> server -> publisher)
+      socket.on('answer', async ({ fromSocketId, sdp }) => {
+        console.log('received answer from', fromSocketId);
+        const pc = pcs.get(fromSocketId);
+        if (!pc) {
+          console.warn('no pc found for answer from', fromSocketId);
+          return;
+        }
+        try {
+          await pc.setRemoteDescription({ type: 'answer', sdp });
+          console.log('setRemoteDescription(answer) done for', fromSocketId);
+        } catch (err) {
+          console.error('setRemoteDescription(answer) error', err);
+        }
+      });
+
+      // handle ICE candidate from viewer
+      socket.on('ice-candidate', async ({ fromSocketId, candidate }) => {
+        const pc = pcs.get(fromSocketId);
+        if (!pc) {
+          console.warn('no pc for incoming candidate from', fromSocketId);
+          return;
+        }
+        try {
+          await pc.addIceCandidate(candidate);
+        } catch (err) {
+          console.warn('addIceCandidate error', err);
+        }
+      });
+
+      socket.on('publisher-left', ({ reason }) => {
+        // shouldn't happen for publisher, but keep
+        console.log('publisher-left', reason);
+      });
+
+      socket.on('chat-message', ({ username, message, ts }) => {
+        console.log(`[chat ${fmtTime(ts)}] ${username}: ${message}`);
+      });
+
+      statusEl.textContent = 'Connected as publisher — waiting for viewers';
+    });
+
+          // ---- Chat setup (publisher) ----
+      const chatMount = document.getElementById('chatMount');
+      const chatUI = createChatUI(chatMount, { height: '360px', maxWidth: '380px' });
+      const chatLimiter = createRateLimiter({ tokens: 1, refillMs: 1000 });
+
+      // attach send handler
+      chatUI.setOnSend((text) => {
+        if (!socket) return false;
+        if (!chatLimiter.canSend()) {
+          alert('You are sending messages too quickly. Slow down.');
+          return false;
+        }
+        socket.emit('chat-message', { roomId, username, message: text });
+        return true; // clear input
+      });
+
+      // show incoming chat messages
+      socket.on('chat-message', ({ username: from, message, ts }) => {
+        chatUI.appendMessage({ username: from, message, ts });
+      });
+
+      // show info messages for join/leave
+      socket.on('viewer-joined', ({ viewerSocketId, username }) => {
+        chatUI.appendMessage({ type: 'info', message: `${username || 'Viewer'} joined`, ts: Date.now() });
+      });
+      socket.on('viewer-left', ({ viewerSocketId }) => {
+        chatUI.appendMessage({ type: 'info', message: `Viewer left`, ts: Date.now() });
+      });
+      socket.on('publisher-left', ({ reason }) => {
+        chatUI.appendMessage({ type: 'info', message: `Publisher left: ${reason}`, ts: Date.now() });
+      });
+
+
+    // STOP button
+    stopBtn.addEventListener('click', () => {
+      if (localStream) {
+        localStream.getTracks().forEach(t => t.stop());
+        localVideo.srcObject = null;
+        localStream = null;
+      }
+      // close all RTCPeerConnections
+      for (const [id, pc] of pcs.entries()) {
+        try { pc.close(); } catch(e){}
+      }
+      pcs.clear();
+      viewers.clear();
+      renderViewers();
+
+      if (socket) {
+        socket.emit('stop-stream', { roomId });
+      }
+      stopBtn.disabled = true;
+      startBtn.disabled = false;
+      statusEl.textContent = 'Stream stopped';
+    });
+  </script>
+</body>
+</html>

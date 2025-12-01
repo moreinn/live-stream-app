@@ -1,0 +1,159 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Viewer — Live Stream</title>
+  <link rel="stylesheet" href="/styles.css">
+  <style>
+    body { font-family: Arial, sans-serif; padding: 16px; }
+    #remoteVideo { width: 800px; height: 450px; background: #000; }
+    #status { margin-top: 8px; color: blue; }
+  </style>
+</head>
+<body>
+  <h1>Viewer Page</h1>
+  <div><strong>Room:</strong> <span id="roomId">—</span></div>
+  <video id="remoteVideo" autoplay playsinline></video>
+  <div id="status">Not connected</div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/client.js"></script>
+  <script>
+    const q = parseQuery();
+    const roomId = q.room;
+    if (!roomId) {
+      document.getElementById('status').textContent = 'No room specified in URL';
+      throw new Error('room required');
+    }
+    document.getElementById('roomId').textContent = roomId;
+
+    const remoteVideo = document.getElementById('remoteVideo');
+    const statusEl = document.getElementById('status');
+      <div style="display:flex; gap:12px; align-items:flex-start;">
+    <div>
+      <video id="remoteVideo" autoplay playsinline style="width:800px;height:450px;background:#000"></video>
+      <div id="status">Not connected</div>
+    </div>
+
+    <div id="chatMount" style="flex:0 0 380px"></div>
+  </div>
+
+
+    let socket = createSocket();
+    // single RTCPeerConnection for this viewer
+    let pc = null;
+
+    const ICE_CONFIG = {
+      iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' }
+      ]
+    };
+
+    // get a username for chat (optional)
+    let username = localStorage.getItem('username') || prompt('Enter your display name:', 'Viewer');
+    if (!username) username = 'Viewer';
+    localStorage.setItem('username', username);
+
+    socket.emit('join-room', { roomId, role: 'viewer', username });
+
+    socket.on('joined', (data) => {
+      statusEl.textContent = `Joined room ${data.roomId} as viewer (socket: ${data.mySocketId})`;
+    });
+
+    // When publisher exists, server will notify it; we (viewer) mainly wait for 'offer'
+    socket.on('info', ({ message }) => {
+      statusEl.textContent = message;
+    });
+
+    // When publisher sends an offer (via server) we create pc, set remote, and reply with answer
+    socket.on('offer', async ({ fromSocketId, sdp }) => {
+      console.log('received offer from publisher', fromSocketId);
+      statusEl.textContent = 'Received offer — creating peer connection...';
+
+          // ---- Chat setup (viewer) ----
+    const chatMount = document.getElementById('chatMount');
+    const chatUI = createChatUI(chatMount, { height: '450px', maxWidth: '380px' });
+    const chatLimiter = createRateLimiter({ tokens: 1, refillMs: 1000 });
+
+    chatUI.setOnSend((text) => {
+      if (!socket) return false;
+      if (!chatLimiter.canSend()) {
+        alert('You are sending messages too quickly. Slow down.');
+        return false;
+      }
+      socket.emit('chat-message', { roomId, username, message: text });
+      return true;
+    });
+
+    // render incoming chat messages
+    socket.on('chat-message', ({ username: from, message, ts }) => {
+      chatUI.appendMessage({ username: from, message, ts });
+    });
+
+    // render info messages
+    socket.on('info', ({ message }) => {
+      chatUI.appendMessage({ type: 'info', message, ts: Date.now() });
+    });
+
+    socket.on('publisher-left', ({ reason }) => {
+      chatUI.appendMessage({ type: 'info', message: `Publisher left: ${reason}`, ts: Date.now() });
+    });
+
+
+      // create pc
+      pc = new RTCPeerConnection(ICE_CONFIG);
+
+      pc.ontrack = (evt) => {
+        console.log('ontrack', evt.streams);
+        // attach first stream to video
+        remoteVideo.srcObject = evt.streams[0];
+      };
+
+      // send ICE candidates to publisher via server
+      pc.onicecandidate = (evt) => {
+        if (evt.candidate) {
+          socket.emit('ice-candidate', { toSocketId: fromSocketId, candidate: evt.candidate });
+        }
+      };
+
+      try {
+        await pc.setRemoteDescription({ type: 'offer', sdp });
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        // send answer back to publisher (server forwards to publisher socket)
+        socket.emit('answer', { toSocketId: fromSocketId, sdp: answer.sdp });
+        statusEl.textContent = 'Sent answer — waiting for remote stream...';
+      } catch (err) {
+        console.error('error handling offer', err);
+      }
+    });
+
+    // receive ICE candidates from publisher
+    socket.on('ice-candidate', async ({ fromSocketId, candidate }) => {
+      if (!pc) {
+        console.warn('no pc when receiving candidate');
+        return;
+      }
+      try {
+        await pc.addIceCandidate(candidate);
+      } catch (err) {
+        console.warn('addIceCandidate error', err);
+      }
+    });
+
+    socket.on('publisher-left', ({ reason }) => {
+      statusEl.textContent = 'Publisher left: ' + reason;
+      // close pc and remove video
+      if (pc) {
+        try { pc.close(); } catch(e){}
+        pc = null;
+        remoteVideo.srcObject = null;
+      }
+    });
+
+    socket.on('chat-message', ({ username, message, ts }) => {
+      console.log(`[chat ${fmtTime(ts)}] ${username}: ${message}`);
+    });
+  </script>
+</body>
+</html>

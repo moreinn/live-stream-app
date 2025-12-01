@@ -1,0 +1,64 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Live Stream App — Home</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <h1>Live Stream App</h1>
+  <div>
+    <button id="goLiveBtn">Go Live (create room)</button>
+    <input id="roomInput" placeholder="Or enter room id to join" />
+    <button id="joinBtn">Join Room</button>
+  </div>
+
+  <h2>Active Rooms</h2>
+  <ul id="roomsList"></ul>
+
+  <script>
+    // small helper to fetch and render active rooms
+    async function loadRooms() {
+      try {
+        const res = await fetch('/rooms');
+        const list = await res.json();
+        const ul = document.getElementById('roomsList');
+        ul.innerHTML = '';
+        if (list.length === 0) {
+          ul.innerHTML = '<li>No active rooms</li>';
+          return;
+        }
+        list.forEach(r => {
+          const li = document.createElement('li');
+          const joinLink = `/viewer.html?room=${encodeURIComponent(r.roomId)}`;
+          li.innerHTML = `Room <strong>${r.roomId}</strong>
+                          ${r.hasPublisher ? '(LIVE)' : '(no publisher)'}
+                          - viewers: ${r.viewerCount}
+                          <a href="${joinLink}" style="margin-left:12px">Join</a>`;
+          ul.appendChild(li);
+        });
+      } catch (e) {
+        console.error('failed to load rooms', e);
+      }
+    }
+
+    document.getElementById('goLiveBtn').addEventListener('click', () => {
+      // create a simple random room id
+      const id = 'room-' + Math.random().toString(36).slice(2, 9);
+      // open publisher page with generated room id
+      window.location = `/publisher.html?room=${id}`;
+    });
+
+    document.getElementById('joinBtn').addEventListener('click', () => {
+      const id = document.getElementById('roomInput').value.trim();
+      if (!id) return alert('Enter a room id');
+      window.location = `/viewer.html?room=${encodeURIComponent(id)}`;
+    });
+
+    // initial load
+    loadRooms();
+    // refresh every 5 seconds
+    setInterval(loadRooms, 5000);
+  </script>
+</body>
+</html>

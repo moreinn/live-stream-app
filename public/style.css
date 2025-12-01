@@ -1,0 +1,4 @@
+.chat-container { font-family: Arial, sans-serif; font-size: 14px; }
+.chat-list li { margin-bottom: 6px; }
+.chat-input input { border: 1px solid #ddd; border-radius: 4px; }
+.chat-input button { padding: 8px 10px; border-radius: 4px; }
