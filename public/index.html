@@ -17,7 +17,7 @@
   <ul id="roomsList"></ul>
 
   <script>
-    // small helper to fetch and render active rooms
+ 
     async function loadRooms() {
       try {
         const res = await fetch('/rooms');
@@ -57,7 +57,7 @@
 
     // initial load
     loadRooms();
-    // refresh every 5 seconds
+   
     setInterval(loadRooms, 5000);
   </script>
 </body>
