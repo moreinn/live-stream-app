@@ -1,7 +1,4 @@
-// public/client.js
-// Small helper functions used by publisher & viewer pages
 
-// parse query string like ?room=room-abc
 function parseQuery() {
   const q = {};
   location.search.replace(/^\?/, '').split('&').forEach(pair => {
@@ -12,7 +9,7 @@ function parseQuery() {
   return q;
 }
 
-// create socket and attach simple logging
+
 function createSocket() {
   const socket = io(); // will connect to same origin
   socket.on('connect', () => console.log('socket connected', socket.id));
@@ -21,29 +18,15 @@ function createSocket() {
   return socket;
 }
 
-// format timestamp to time string
+
 function fmtTime(ts) {
   const d = new Date(ts);
   return d.toLocaleTimeString();
 }
 
-/*
-  Chat UI helper
-  - mountPoint: DOM element to append the chat UI into (a container element)
-  - onSend(message) -> function called when user sends a message. Should return true if sent.
-  Returns an object with:
-    .appendMessage({ username, message, ts, type }) // type: 'chat' | 'info'
-    .setDisabled(bool)
-*/
+
 function createChatUI(mountPoint, opts = {}) {
-  // structure:
-  // <div class="chat">
-  //   <ul class="chat-list"></ul>
-  //   <div class="chat-input">
-  //     <input />
-  //     <button>Send</button>
-  //   </div>
-  // </div>
+
   const container = document.createElement('div');
   container.className = 'chat-container';
   container.style.maxWidth = opts.maxWidth || '380px';
