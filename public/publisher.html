@@ -70,19 +70,19 @@
 
     let socket = null;
     let localStream = null;
-    // Map viewerSocketId -> RTCPeerConnection
+    
     const pcs = new Map();
-    // Map viewerSocketId -> username
+    
     const viewers = new Map();
 
-    // ICE servers (use public STUN for local testing)
+    
     const ICE_CONFIG = {
       iceServers: [
         { urls: 'stun:stun.l.google.com:19302' }
       ]
     };
 
-    // Helper to create peer connection for a viewer
+    
     function createPeerForViewer(viewerSocketId) {
       if (!localStream) {
         console.warn('no local stream when creating pc');
@@ -90,17 +90,17 @@
       }
       const pc = new RTCPeerConnection(ICE_CONFIG);
 
-      // add local tracks to this peer connection
+      
       localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
 
-      // when this pc produces ICE candidates, send them to the viewer
+      
       pc.onicecandidate = (evt) => {
         if (evt.candidate) {
           socket.emit('ice-candidate', { toSocketId: viewerSocketId, candidate: evt.candidate });
         }
       };
 
-      // Optional: listen for connection state changes for debugging
+      
       pc.onconnectionstatechange = () => {
         console.log('PC state', viewerSocketId, pc.connectionState);
       };
@@ -118,7 +118,7 @@
       }
     }
 
-    // START button: getUserMedia, connect socket, join as publisher
+    
     startBtn.addEventListener('click', async () => {
       startBtn.disabled = true;
       statusEl.textContent = 'Requesting camera/microphone...';
@@ -142,10 +142,10 @@
       if (!username) username = 'Streamer';
       localStorage.setItem('username', username);
 
-      // join as publisher
+      
       socket.emit('join-room', { roomId, role: 'publisher', username });
 
-      // handle server events
+      //  server events
       socket.on('joined', (data) => {
         statusEl.textContent = `Joined room ${data.roomId} as publisher (socket: ${data.mySocketId})`;
         stopBtn.disabled = false;
@@ -157,7 +157,7 @@
         renderViewers();
         statusEl.textContent = `Viewer joined: ${username || viewerSocketId}`;
 
-        // Create RTCPeerConnection for this viewer and send offer
+        //  RTCPeerConnection for this viewer and send offer
         const pc = createPeerForViewer(viewerSocketId);
         pcs.set(viewerSocketId, pc);
 
@@ -185,7 +185,7 @@
         renderViewers();
       });
 
-      // handle answer from viewer (viewer -> server -> publisher)
+      // handle answer from viewer
       socket.on('answer', async ({ fromSocketId, sdp }) => {
         console.log('received answer from', fromSocketId);
         const pc = pcs.get(fromSocketId);
@@ -201,7 +201,7 @@
         }
       });
 
-      // handle ICE candidate from viewer
+      //  ICE candidate from viewer
       socket.on('ice-candidate', async ({ fromSocketId, candidate }) => {
         const pc = pcs.get(fromSocketId);
         if (!pc) {
@@ -216,7 +216,7 @@
       });
 
       socket.on('publisher-left', ({ reason }) => {
-        // shouldn't happen for publisher, but keep
+        
         console.log('publisher-left', reason);
       });
 
