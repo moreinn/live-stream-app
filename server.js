@@ -1,20 +1,20 @@
-// server.js
+
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 
-// --- App + HTTP server ---
+
 const app = express();
 const server = http.createServer(app);
 
-// Serve static files from 'public' folder
+
 app.use(express.static('public'));
 
-// Simple API to list active rooms (for the homepage)
-const rooms = {}; // map: roomId -> { publisher: socketId|null, viewers: Set }
+
+const rooms = {}; 
 
 app.get('/rooms', (req, res) => {
-  // return minimal info for public listing
+
   const list = Object.entries(rooms).map(([roomId, info]) => ({
     roomId,
     hasPublisher: !!info.publisher,
@@ -23,10 +23,10 @@ app.get('/rooms', (req, res) => {
   res.json(list);
 });
 
-// --- Socket.IO setup ---
+
 const io = new Server(server);
 
-// Helper: ensure room object exists
+
 function ensureRoom(roomId) {
   if (!rooms[roomId]) {
     rooms[roomId] = { publisher: null, viewers: new Set() };
