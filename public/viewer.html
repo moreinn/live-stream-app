@@ -40,7 +40,7 @@
 
 
     let socket = createSocket();
-    // single RTCPeerConnection for this viewer
+  
     let pc = null;
 
     const ICE_CONFIG = {
@@ -49,7 +49,6 @@
       ]
     };
 
-    // get a username for chat (optional)
     let username = localStorage.getItem('username') || prompt('Enter your display name:', 'Viewer');
     if (!username) username = 'Viewer';
     localStorage.setItem('username', username);
@@ -60,17 +59,16 @@
       statusEl.textContent = `Joined room ${data.roomId} as viewer (socket: ${data.mySocketId})`;
     });
 
-    // When publisher exists, server will notify it; we (viewer) mainly wait for 'offer'
+   
     socket.on('info', ({ message }) => {
       statusEl.textContent = message;
     });
 
-    // When publisher sends an offer (via server) we create pc, set remote, and reply with answer
     socket.on('offer', async ({ fromSocketId, sdp }) => {
       console.log('received offer from publisher', fromSocketId);
       statusEl.textContent = 'Received offer — creating peer connection...';
 
-          // ---- Chat setup (viewer) ----
+        
     const chatMount = document.getElementById('chatMount');
     const chatUI = createChatUI(chatMount, { height: '450px', maxWidth: '380px' });
     const chatLimiter = createRateLimiter({ tokens: 1, refillMs: 1000 });
@@ -85,7 +83,7 @@
       return true;
     });
 
-    // render incoming chat messages
+    
     socket.on('chat-message', ({ username: from, message, ts }) => {
       chatUI.appendMessage({ username: from, message, ts });
     });
@@ -128,7 +126,7 @@
       }
     });
 
-    // receive ICE candidates from publisher
+    
     socket.on('ice-candidate', async ({ fromSocketId, candidate }) => {
       if (!pc) {
         console.warn('no pc when receiving candidate');
@@ -143,7 +141,7 @@
 
     socket.on('publisher-left', ({ reason }) => {
       statusEl.textContent = 'Publisher left: ' + reason;
-      // close pc and remove video
+     
       if (pc) {
         try { pc.close(); } catch(e){}
         pc = null;
